@@ -7,7 +7,10 @@ export const SITE = {
   brandHtml: 'Flipkart Label <b>Crop</b>',
   url: 'https://iammannan.github.io/flipkart-label-crop',
   basePath: '/flipkart-label-crop',
-  verification: 'LMS3AOoHfi0_sx1Yclv-TNRC5pz4a_rOPdqwuJNp_jQ', // Google Search Console
+  verification: [
+    'vnPC8jsPF6fEVp71Q8wE5sq-Bo1aErFa_6OSzbbw8nI', // Google Search Console
+    'LMS3AOoHfi0_sx1Yclv-TNRC5pz4a_rOPdqwuJNp_jQ',
+  ],
   googleAdsId: 'AW-939306740',
   googleAdsConversionLabel: 'AW-939306740/Btw8CO_9wYkdEPTd8r8D',
   googleAdsPageViewLabel: 'AW-939306740/gh_wCO31vpMdEPTd8r8D',
