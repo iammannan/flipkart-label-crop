@@ -431,6 +431,8 @@ ${page.after || ''}` : `
 <meta name="description" content="${esc(page.description)}">
 ${page.noindex ? '<meta name="robots" content="noindex">' : `<link rel="canonical" href="${url}">`}
 <meta name="theme-color" content="#0E1116">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<meta http-equiv="X-Content-Type-Options" content="nosniff">
 ${Array.isArray(site.verification) ? site.verification.map(v => `<meta name="google-site-verification" content="${esc(v)}">`).join('\n') : (site.verification ? `<meta name="google-site-verification" content="${esc(site.verification)}">` : "")}
 ${site.googleAdsId ? `<!-- Google tag (gtag.js) -->
 <script async src="https://www.googletagmanager.com/gtag/js?id=${site.googleAdsId}"></script>
