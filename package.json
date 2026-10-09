@@ -1,0 +1,36 @@
+{
+  "name": "flipkart-label-crop",
+  "version": "1.0.0",
+  "description": "Flipkart Label Crop & Cutter — Free Quick Label Crop Tool for 4x6 Thermal Printers. 100% on-device & private.",
+  "type": "module",
+  "homepage": "https://iammannan.github.io/flipkart-label-crop/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/iammannan/flipkart-label-crop.git"
+  },
+  "keywords": [
+    "flipkart-label-crop",
+    "flipkart-label-cutter",
+    "flipkart-label",
+    "quick-label-crop",
+    "flipkart-shipping-label",
+    "flipkart-crop-pdf",
+    "thermal-printer",
+    "shipping-label-cropper",
+    "4x6-thermal-label",
+    "meesho-label-crop"
+  ],
+  "author": "Mannar Mannan",
+  "license": "MIT",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "serve": "node scripts/serve.mjs",
+    "dev": "node scripts/build.mjs && node scripts/serve.mjs",
+    "test": "node scripts/build.mjs && node scripts/e2e.mjs"
+  },
+  "devDependencies": {
+    "pdf-lib": "1.17.1",
+    "pdfjs-dist": "4.10.38",
+    "puppeteer-core": "^24.0.0"
+  }
+}
