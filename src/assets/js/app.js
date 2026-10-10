@@ -23,7 +23,7 @@ function init() {
   const DEFAULTS = {
     output: 'labels', paper: '4x6', sort: 'original', footerSku: false, highlightMulti: true,
     footerDate: false, footerText: '', autoRotate: true, cutGuides: true,
-    smartFit: false, removeMargin: false,
+    smartFit: false, removeMargin: false, enlargeQr: false,
   };
   const STORE_KEY = 'lcai:settings:v1';
   const store = {
@@ -232,7 +232,7 @@ function init() {
     const fd = new FormData(els.form);
     const s = { ...state.settings };
     for (const key of ['output', 'paper', 'sort']) s[key] = fd.get(key) || s[key];
-    for (const key of ['footerSku', 'highlightMulti', 'footerDate', 'autoRotate', 'cutGuides', 'smartFit', 'removeMargin']) s[key] = fd.has(key);
+    for (const key of ['footerSku', 'highlightMulti', 'footerDate', 'autoRotate', 'cutGuides', 'smartFit', 'removeMargin', 'enlargeQr']) s[key] = fd.has(key);
     s.footerText = String(fd.get('footerText') || '').slice(0, 60);
     return s;
   }

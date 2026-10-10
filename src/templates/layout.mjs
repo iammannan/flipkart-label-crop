@@ -136,6 +136,7 @@ function toolMarkup(platform, preset) {
             <label class="switch"><input type="checkbox" name="autoRotate" checked><span></span>Auto-rotate to fill the paper</label>
             <label class="switch"><input type="checkbox" name="smartFit"><span></span>Smart fit (4 + 2 rotated to save space)</label>
             <label class="switch"><input type="checkbox" name="removeMargin"><span></span>Remove margins (larger QR &amp; barcode)</label>
+            <label class="switch"><input type="checkbox" name="enlargeQr"><span></span>Enlarge QR (clearer courier scanning)</label>
             <label class="switch"><input type="checkbox" name="cutGuides" checked><span></span>Cut guides on A4 sheets</label>
           </fieldset>
         </form>

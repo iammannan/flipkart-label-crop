@@ -108,9 +108,11 @@ async function analyzePage(lib, page, canvas, ctx, platform = 'auto') {
   const ink = inkMap(ctx.getImageData(0, 0, canvas.width, canvas.height));
 
   const regions = findRegions({ items, ink, W, H, platform: pagePlatform });
+  const ops = await page.getOperatorList().catch(() => null);
+  const qrCodes = detectQrCodes(lib, ops, vp, items, ink, W, H);
   return {
     width: W, height: H, rotate: page.rotate, viewport: vp,
-    items, lines, text, regions,
+    items, lines, text, regions, qrCodes,
   };
 }
 
@@ -375,6 +377,244 @@ function findDashedRow(ink) {
     } else if (group) break;
   }
   return group && { top: group.top / ink.scale, bottom: (group.bottom + 1) / ink.scale };
+}
+
+// ---------------------------------------------------------------- QR detection & enlargement
+
+function detectQrCodes(lib, ops, vp, items, ink, W, H) {
+  const candidates = [];
+
+  // 1. Image XObjects from PDF operator list
+  if (ops && lib?.OPS) {
+    let ctm = [1, 0, 0, 1, 0, 0];
+    const stack = [];
+    for (let i = 0; i < ops.fnArray.length; i++) {
+      const fn = ops.fnArray[i];
+      if (fn === lib.OPS.save) {
+        stack.push([...ctm]);
+      } else if (fn === lib.OPS.restore) {
+        if (stack.length) ctm = stack.pop();
+      } else if (fn === lib.OPS.transform) {
+        const [a1, b1, c1, d1, e1, f1] = ctm;
+        const [a2, b2, c2, d2, e2, f2] = ops.argsArray[i];
+        ctm = [
+          a1 * a2 + c1 * b2, b1 * a2 + d1 * b2,
+          a1 * c2 + c1 * d2, b1 * c2 + d1 * d2,
+          a1 * e2 + c1 * f2 + e1, b1 * e2 + d1 * f2 + f1,
+        ];
+      } else if (fn === lib.OPS.paintImageXObject || fn === lib.OPS.paintInlineImageXObject || fn === lib.OPS.paintImageMaskXObject) {
+        const w = Math.hypot(ctm[0], ctm[1]);
+        const h = Math.hypot(ctm[2], ctm[3]);
+        const ar = w / h;
+        if (ar >= 0.78 && ar <= 1.28 && w >= 28 && w <= 240) {
+          const [vx0, vy0] = vp.convertToViewportPoint(ctm[4], ctm[5]);
+          const [vx1, vy1] = vp.convertToViewportPoint(ctm[4] + ctm[0], ctm[5] + ctm[3]);
+          candidates.push({
+            x0: Math.min(vx0, vx1),
+            y0: Math.min(vy0, vy1),
+            x1: Math.max(vx0, vx1),
+            y1: Math.max(vy0, vy1),
+            w: Math.abs(vx1 - vx0),
+            h: Math.abs(vy1 - vy0),
+          });
+        }
+      }
+    }
+  }
+
+  // 2. Visual finder pattern detector from ink map (for vector QR codes or scanned documents)
+  if (!candidates.length && ink) {
+    const visual = findVisualQrFromInk(ink, W, H);
+    for (const v of visual) candidates.push(v);
+  }
+
+  const results = [];
+  for (const box of candidates) {
+    if (results.some(r => Math.hypot(r.box.x0 - box.x0, r.box.y0 - box.y0) < 15)) continue;
+    const enlarged = computeQrEnlargement(box, items, ink, W, H);
+    results.push({
+      box,
+      enlargedBox: enlarged?.box || null,
+      growthRatio: enlarged?.ratio || 1,
+    });
+  }
+  return results;
+}
+
+function computeQrEnlargement(qr, items, ink, W, H) {
+  const SAFETY = 2.5;
+  const qx0 = qr.x0, qy0 = qr.y0, qx1 = qr.x1, qy1 = qr.y1;
+  const qw = qr.w, qh = qr.h;
+
+  let maxLeft = 0, minRight = W, maxTop = 0, minBottom = H;
+
+  for (const it of items) {
+    if (it.y1 >= qy0 - 2 && it.y0 <= qy1 + 2) {
+      if (it.x1 <= qx0 + 1 && it.x1 > maxLeft) maxLeft = it.x1;
+      if (it.x0 >= qx1 - 1 && it.x0 < minRight) minRight = it.x0;
+    }
+    if (it.x1 >= qx0 - 2 && it.x0 <= qx1 + 2) {
+      if (it.y1 <= qy0 + 1 && it.y1 > maxTop) maxTop = it.y1;
+      if (it.y0 >= qy1 - 1 && it.y0 < minBottom) minBottom = it.y0;
+    }
+  }
+
+  if (ink) {
+    const s = ink.scale;
+    const py0 = Math.max(0, Math.floor(qy0 * s)), py1 = Math.min(ink.height - 1, Math.ceil(qy1 * s));
+    const px0 = Math.max(0, Math.floor(qx0 * s)), px1 = Math.min(ink.width - 1, Math.ceil(qx1 * s));
+    const maxScanPx = Math.round(60 * s);
+
+    const limitLeft = Math.max(0, px0 - maxScanPx);
+    for (let x = px0 - 2; x >= limitLeft; x--) {
+      let dark = 0;
+      for (let y = py0; y <= py1; y++) if (ink.mask[y * ink.width + x]) dark++;
+      if (dark > 1) { const pt = (x + 1) / s; if (pt > maxLeft) maxLeft = pt; break; }
+    }
+
+    const limitRight = Math.min(ink.width - 1, px1 + maxScanPx);
+    for (let x = px1 + 2; x <= limitRight; x++) {
+      let dark = 0;
+      for (let y = py0; y <= py1; y++) if (ink.mask[y * ink.width + x]) dark++;
+      if (dark > 1) { const pt = (x - 1) / s; if (pt < minRight) minRight = pt; break; }
+    }
+
+    const limitTop = Math.max(0, py0 - maxScanPx);
+    for (let y = py0 - 2; y >= limitTop; y--) {
+      let dark = 0;
+      for (let y = py0; y <= py1; y++) if (ink.mask[y * ink.width + x]) dark++;
+      if (dark > 1) { const pt = (y + 1) / s; if (pt > maxTop) maxTop = pt; break; }
+    }
+
+    const limitBottom = Math.min(ink.height - 1, py1 + maxScanPx);
+    for (let y = py1 + 2; y <= limitBottom; y++) {
+      let dark = 0;
+      for (let x = px0; x <= px1; x++) if (ink.mask[y * ink.width + x]) dark++;
+      if (dark > 1) { const pt = (y - 1) / s; if (pt < minBottom) minBottom = pt; break; }
+    }
+  }
+
+  const freeLeft = Math.max(0, (qx0 - maxLeft) - SAFETY);
+  const freeRight = Math.max(0, (minRight - qx1) - SAFETY);
+  const freeTop = Math.max(0, (qy0 - maxTop) - SAFETY);
+  const freeBottom = Math.max(0, (minBottom - qy1) - SAFETY);
+
+  const totalAvailW = qw + freeLeft + freeRight;
+  const totalAvailH = qh + freeTop + freeBottom;
+  const maxSize = Math.min(totalAvailW, totalAvailH);
+  const targetSize = Math.min(qw * 1.40, maxSize);
+
+  if (targetSize <= qw * 1.05) return null;
+
+  const grow = targetSize - qw;
+
+  let expandLeft = Math.min(freeLeft, grow / 2);
+  let expandRight = grow - expandLeft;
+  if (expandRight > freeRight) {
+    expandRight = freeRight;
+    expandLeft = Math.min(freeLeft, grow - expandRight);
+  }
+
+  let expandTop = Math.min(freeTop, grow / 2);
+  let expandBottom = grow - expandTop;
+  if (expandBottom > freeBottom) {
+    expandBottom = freeBottom;
+    expandTop = Math.min(freeTop, grow - expandBottom);
+  }
+
+  const newX0 = qx0 - expandLeft;
+  const newY0 = qy0 - expandTop;
+
+  return {
+    box: {
+      x0: newX0,
+      y0: newY0,
+      x1: newX0 + targetSize,
+      y1: newY0 + targetSize,
+      w: targetSize,
+      h: targetSize,
+    },
+    ratio: targetSize / qw,
+  };
+}
+
+function findVisualQrFromInk(ink, W, H) {
+  const { mask, width: w, height: h, scale: s } = ink;
+  const finders = [];
+  for (let y = 6; y < h - 6; y += 3) {
+    const row = y * w;
+    let counts = [0, 0, 0, 0, 0];
+    let state = 0;
+    for (let x = 0; x < w; x++) {
+      const dark = mask[row + x] === 1;
+      if (dark) {
+        if ((state & 1) === 1) state++;
+        counts[state]++;
+      } else {
+        if ((state & 1) === 0) {
+          if (state === 4) {
+            const total = counts[0] + counts[1] + counts[2] + counts[3] + counts[4];
+            const mod = total / 7;
+            const tol = mod * 0.65;
+            if (
+              Math.abs(counts[0] - mod) < tol &&
+              Math.abs(counts[1] - mod) < tol &&
+              Math.abs(counts[2] - 3 * mod) < 3 * tol &&
+              Math.abs(counts[3] - mod) < tol &&
+              Math.abs(counts[4] - mod) < tol &&
+              total >= 14 && total <= 180
+            ) {
+              const cx = (x - counts[4] - counts[3] - counts[2] / 2) / s;
+              const cy = y / s;
+              finders.push({ x: cx, y: cy, size: total / s });
+            }
+            counts[0] = counts[2]; counts[1] = counts[3]; counts[2] = counts[4];
+            counts[3] = 1; counts[4] = 0;
+            state = 3;
+          } else {
+            state++;
+            counts[state]++;
+          }
+        } else {
+          counts[state]++;
+        }
+      }
+    }
+  }
+
+  const qrs = [];
+  for (let i = 0; i < finders.length; i++) {
+    for (let j = i + 1; j < finders.length; j++) {
+      const f1 = finders[i], f2 = finders[j];
+      const d12 = Math.hypot(f1.x - f2.x, f1.y - f2.y);
+      if (d12 < 25 || d12 > 180) continue;
+      if (Math.abs(f1.size - f2.size) > Math.min(f1.size, f2.size) * 0.45) continue;
+      for (let k = j + 1; k < finders.length; k++) {
+        const f3 = finders[k];
+        const d13 = Math.hypot(f1.x - f3.x, f1.y - f3.y);
+        const d23 = Math.hypot(f2.x - f3.x, f2.y - f3.y);
+        const dists = [
+          { p1: f1, p2: f2, p3: f3, hyp: d12, d1: d13, d2: d23 },
+          { p1: f1, p2: f3, p3: f2, hyp: d13, d1: d12, d2: d23 },
+          { p1: f2, p2: f3, p3: f1, hyp: d23, d1: d12, d2: d13 },
+        ];
+        for (const { p1, p2, p3, hyp, d1, d2 } of dists) {
+          if (Math.abs(d1 - d2) < d1 * 0.25 && Math.abs(hyp - Math.SQRT2 * d1) < hyp * 0.28) {
+            const minX = Math.min(f1.x, f2.x, f3.x) - p3.size / 2;
+            const maxX = Math.max(f1.x, f2.x, f3.x) + p3.size / 2;
+            const minY = Math.min(f1.y, f2.y, f3.y) - p3.size / 2;
+            const maxY = Math.max(f1.y, f2.y, f3.y) + p3.size / 2;
+            const w = maxX - minX, h = maxY - minY;
+            if (w >= 30 && w <= 220 && Math.abs(w - h) < w * 0.25) {
+              qrs.push({ x0: minX, y0: minY, x1: maxX, y1: maxY, w, h });
+            }
+            break;
+          }
+        }
+      }
+    }
+  }
+  return qrs;
 }
 
 // ---------------------------------------------------------------- order details

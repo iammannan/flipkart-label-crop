@@ -150,6 +150,7 @@ export async function buildPdf(files, orders, settings) {
     const doc = await sourceDoc(file, PDFDocument);
     it.w = box.x1 - box.x0;
     it.h = box.y1 - box.y0;
+    it.cropBox = box;
     it.baseRot = -(it.ref.page.rotate || 0);
     if (doc.isEncrypted) {
       it.obj = await rasterRegion(file, it.ref, box, out);
@@ -161,6 +162,27 @@ export async function buildPdf(files, orders, settings) {
       it.w = pdfBox.right - pdfBox.left;
       it.h = pdfBox.top - pdfBox.bottom;
     }
+
+    it.qrs = [];
+    if (settings.enlargeQr && it.ref.page.qrCodes?.length) {
+      for (const q of it.ref.page.qrCodes) {
+        if (!q.enlargedBox) continue;
+        if (q.box.x0 >= box.x0 - 2 && q.box.x1 <= box.x1 + 2 &&
+            q.box.y0 >= box.y0 - 2 && q.box.y1 <= box.y1 + 2) {
+          const qrItem = { ...q };
+          if (doc.isEncrypted) {
+            qrItem.obj = await rasterRegion(file, it.ref, q.box, out);
+            qrItem.isImage = true;
+          } else {
+            const qrPdfBox = toPdfBox(it.ref.page, q.box);
+            qrItem.obj = await out.embedPage(doc.getPage(it.ref.pageIndex), qrPdfBox);
+            qrItem.isImage = false;
+          }
+          it.qrs.push(qrItem);
+        }
+      }
+    }
+
     it.footer = it.kind === 'label' ? footerLine(it.order, settings) : '';
     it.multi = it.kind === 'label' && settings.highlightMulti && it.order.meta.qty > 1;
   }
@@ -322,6 +344,44 @@ export async function buildPdf(files, orders, settings) {
     const opts = { x, y, width: w, height: h, rotate: degrees(theta) };
     if (it.isImage) pg.drawImage(it.obj, opts);
     else pg.drawPage(it.obj, opts);
+
+    if (settings.enlargeQr && it.qrs?.length) {
+      for (const qr of it.qrs) {
+        if (!qr.obj || !qr.enlargedBox) continue;
+        const cropBox = it.cropBox;
+        const { x0, y0, w: ew, h: eh } = qr.enlargedBox;
+        const rx = x0 - cropBox.x0;
+        const ry = y0 - cropBox.y0;
+
+        const origin = place(w, h, theta, bx, by);
+        const t = (theta * Math.PI) / 180, c = Math.cos(t), s = Math.sin(t);
+        const lx = rx * scale;
+        const ly = (it.h - ry - eh) * scale;
+        const tx = origin.x + lx * c - ly * s;
+        const ty = origin.y + lx * s + ly * c;
+        const tw = ew * scale;
+        const th = eh * scale;
+
+        pg.drawRectangle({
+          x: tx,
+          y: ty,
+          width: tw,
+          height: th,
+          color: rgb(1, 1, 1),
+          rotate: degrees(theta),
+        });
+
+        const drawOpts = {
+          x: tx,
+          y: ty,
+          width: tw,
+          height: th,
+          rotate: degrees(theta),
+        };
+        if (qr.isImage) pg.drawImage(qr.obj, drawOpts);
+        else pg.drawPage(qr.obj, drawOpts);
+      }
+    }
   }
 
   function drawFooter(pg, it, x, y, maxW) {
