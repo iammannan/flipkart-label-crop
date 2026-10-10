@@ -92,7 +92,18 @@ async function analyzePage(lib, page, canvas, ctx, platform = 'auto') {
     if (!it.str || !it.str.trim()) continue;
     const t = lib.Util.transform(vp.transform, it.transform);
     const size = Math.hypot(t[2], t[3]) || it.height || 8;
-    items.push({ str: it.str.trim(), x: t[4], y: t[5], top: t[5] - size, size, w: it.width });
+    items.push({
+      str: it.str.trim(),
+      x: t[4],
+      y: t[5],
+      top: t[5] - size,
+      size,
+      w: it.width,
+      x0: t[4],
+      x1: t[4] + it.width,
+      y0: t[5] - size,
+      y1: t[5] + 1,
+    });
   }
   const lines = groupLines(items);
   const text = lines.map(l => l.text).join('\n');
@@ -109,7 +120,7 @@ async function analyzePage(lib, page, canvas, ctx, platform = 'auto') {
 
   const regions = findRegions({ items, ink, W, H, platform: pagePlatform });
   const ops = await page.getOperatorList().catch(() => null);
-  const qrCodes = detectQrCodes(lib, ops, vp, items, ink, W, H);
+  const qrCodes = detectQrCodes(lib, ops, vp, items, ink, W, H, regions);
   return {
     width: W, height: H, rotate: page.rotate, viewport: vp,
     items, lines, text, regions, qrCodes,
@@ -381,10 +392,10 @@ function findDashedRow(ink) {
 
 // ---------------------------------------------------------------- QR detection & enlargement
 
-function detectQrCodes(lib, ops, vp, items, ink, W, H) {
+function detectQrCodes(lib, ops, vp, items, ink, W, H, regions = []) {
   const candidates = [];
 
-  // 1. Image XObjects from PDF operator list
+  // 1. Image XObjects & Form XObjects from PDF operator list
   if (ops && lib?.OPS) {
     let ctm = [1, 0, 0, 1, 0, 0];
     const stack = [];
@@ -403,26 +414,44 @@ function detectQrCodes(lib, ops, vp, items, ink, W, H) {
           a1 * e2 + c1 * f2 + e1, b1 * e2 + d1 * f2 + f1,
         ];
       } else if (fn === lib.OPS.paintImageXObject || fn === lib.OPS.paintInlineImageXObject || fn === lib.OPS.paintImageMaskXObject) {
-        const w = Math.hypot(ctm[0], ctm[1]);
-        const h = Math.hypot(ctm[2], ctm[3]);
+        const pts = [
+          [0, 0], [1, 0], [1, 1], [0, 1]
+        ].map(([px, py]) => {
+          const X = ctm[0] * px + ctm[2] * py + ctm[4];
+          const Y = ctm[1] * px + ctm[3] * py + ctm[5];
+          return vp.convertToViewportPoint(X, Y);
+        });
+        const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+        const vx0 = Math.min(...xs), vx1 = Math.max(...xs);
+        const vy0 = Math.min(...ys), vy1 = Math.max(...ys);
+        const w = vx1 - vx0, h = vy1 - vy0;
         const ar = w / h;
-        if (ar >= 0.78 && ar <= 1.28 && w >= 28 && w <= 240) {
-          const [vx0, vy0] = vp.convertToViewportPoint(ctm[4], ctm[5]);
-          const [vx1, vy1] = vp.convertToViewportPoint(ctm[4] + ctm[0], ctm[5] + ctm[3]);
-          candidates.push({
-            x0: Math.min(vx0, vx1),
-            y0: Math.min(vy0, vy1),
-            x1: Math.max(vx0, vx1),
-            y1: Math.max(vy0, vy1),
-            w: Math.abs(vx1 - vx0),
-            h: Math.abs(vy1 - vy0),
-          });
+        if (ar >= 0.82 && ar <= 1.22 && w >= 32 && w <= 220) {
+          candidates.push({ x0: vx0, y0: vy0, x1: vx1, y1: vy1, w, h });
+        }
+      } else if (fn === lib.OPS.paintFormXObjectBegin) {
+        const bbox = ops.argsArray[i][1] || [0, 0, 1, 1];
+        const pts = [
+          [bbox[0], bbox[1]], [bbox[2], bbox[1]],
+          [bbox[2], bbox[3]], [bbox[0], bbox[3]]
+        ].map(([px, py]) => {
+          const X = ctm[0] * px + ctm[2] * py + ctm[4];
+          const Y = ctm[1] * px + ctm[3] * py + ctm[5];
+          return vp.convertToViewportPoint(X, Y);
+        });
+        const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+        const vx0 = Math.min(...xs), vx1 = Math.max(...xs);
+        const vy0 = Math.min(...ys), vy1 = Math.max(...ys);
+        const w = vx1 - vx0, h = vy1 - vy0;
+        const ar = w / h;
+        if (ar >= 0.82 && ar <= 1.22 && w >= 32 && w <= 220) {
+          candidates.push({ x0: vx0, y0: vy0, x1: vx1, y1: vy1, w, h });
         }
       }
     }
   }
 
-  // 2. Visual finder pattern detector from ink map (for vector QR codes or scanned documents)
+  // 2. Visual finder pattern detector from ink map (only when operator list contains no candidates)
   if (!candidates.length && ink) {
     const visual = findVisualQrFromInk(ink, W, H);
     for (const v of visual) candidates.push(v);
@@ -431,7 +460,13 @@ function detectQrCodes(lib, ops, vp, items, ink, W, H) {
   const results = [];
   for (const box of candidates) {
     if (results.some(r => Math.hypot(r.box.x0 - box.x0, r.box.y0 - box.y0) < 15)) continue;
-    const enlarged = computeQrEnlargement(box, items, ink, W, H);
+    const matchingRegion = regions.find(r =>
+      box.x0 >= r.box.x0 - 5 && box.x1 <= r.box.x1 + 5 &&
+      box.y0 >= r.box.y0 - 5 && box.y1 <= r.box.y1 + 5
+    ) || regions.find(r => r.kind === 'label');
+    const bounds = matchingRegion?.box || null;
+
+    const enlarged = computeQrEnlargement(box, items, ink, W, H, bounds);
     results.push({
       box,
       enlargedBox: enlarged?.box || null,
@@ -441,14 +476,20 @@ function detectQrCodes(lib, ops, vp, items, ink, W, H) {
   return results;
 }
 
-function computeQrEnlargement(qr, items, ink, W, H) {
-  const SAFETY = 2.5;
+function computeQrEnlargement(qr, items, ink, W, H, bounds) {
+  const SAFETY = 4;
   const qx0 = qr.x0, qy0 = qr.y0, qx1 = qr.x1, qy1 = qr.y1;
   const qw = qr.w, qh = qr.h;
 
-  let maxLeft = 0, minRight = W, maxTop = 0, minBottom = H;
+  let maxLeft = bounds ? bounds.x0 : 0;
+  let minRight = bounds ? bounds.x1 : W;
+  let maxTop = bounds ? bounds.y0 : 0;
+  let minBottom = bounds ? bounds.y1 : H;
 
   for (const it of items) {
+    if (bounds) {
+      if (it.y1 < bounds.y0 || it.y0 > bounds.y1 || it.x1 < bounds.x0 || it.x0 > bounds.x1) continue;
+    }
     if (it.y1 >= qy0 - 2 && it.y0 <= qy1 + 2) {
       if (it.x1 <= qx0 + 1 && it.x1 > maxLeft) maxLeft = it.x1;
       if (it.x0 >= qx1 - 1 && it.x0 < minRight) minRight = it.x0;
@@ -465,29 +506,29 @@ function computeQrEnlargement(qr, items, ink, W, H) {
     const px0 = Math.max(0, Math.floor(qx0 * s)), px1 = Math.min(ink.width - 1, Math.ceil(qx1 * s));
     const maxScanPx = Math.round(60 * s);
 
-    const limitLeft = Math.max(0, px0 - maxScanPx);
-    for (let x = px0 - 2; x >= limitLeft; x--) {
+    const limitLeft = Math.max(Math.floor(maxLeft * s), px0 - maxScanPx);
+    for (let x = px0 - 3; x >= limitLeft; x--) {
       let dark = 0;
       for (let y = py0; y <= py1; y++) if (ink.mask[y * ink.width + x]) dark++;
       if (dark > 1) { const pt = (x + 1) / s; if (pt > maxLeft) maxLeft = pt; break; }
     }
 
-    const limitRight = Math.min(ink.width - 1, px1 + maxScanPx);
-    for (let x = px1 + 2; x <= limitRight; x++) {
+    const limitRight = Math.min(Math.ceil(minRight * s), px1 + maxScanPx);
+    for (let x = px1 + 3; x <= limitRight; x++) {
       let dark = 0;
       for (let y = py0; y <= py1; y++) if (ink.mask[y * ink.width + x]) dark++;
       if (dark > 1) { const pt = (x - 1) / s; if (pt < minRight) minRight = pt; break; }
     }
 
-    const limitTop = Math.max(0, py0 - maxScanPx);
-    for (let y = py0 - 2; y >= limitTop; y--) {
+    const limitTop = Math.max(Math.floor(maxTop * s), py0 - maxScanPx);
+    for (let y = py0 - 3; y >= limitTop; y--) {
       let dark = 0;
-      for (let y = py0; y <= py1; y++) if (ink.mask[y * ink.width + x]) dark++;
+      for (let x = px0; x <= px1; x++) if (ink.mask[y * ink.width + x]) dark++;
       if (dark > 1) { const pt = (y + 1) / s; if (pt > maxTop) maxTop = pt; break; }
     }
 
-    const limitBottom = Math.min(ink.height - 1, py1 + maxScanPx);
-    for (let y = py1 + 2; y <= limitBottom; y++) {
+    const limitBottom = Math.min(Math.ceil(minBottom * s), py1 + maxScanPx);
+    for (let y = py1 + 3; y <= limitBottom; y++) {
       let dark = 0;
       for (let x = px0; x <= px1; x++) if (ink.mask[y * ink.width + x]) dark++;
       if (dark > 1) { const pt = (y - 1) / s; if (pt < minBottom) minBottom = pt; break; }
@@ -502,7 +543,7 @@ function computeQrEnlargement(qr, items, ink, W, H) {
   const totalAvailW = qw + freeLeft + freeRight;
   const totalAvailH = qh + freeTop + freeBottom;
   const maxSize = Math.min(totalAvailW, totalAvailH);
-  const targetSize = Math.min(qw * 1.40, maxSize);
+  const targetSize = Math.min(qw * 1.30, maxSize);
 
   if (targetSize <= qw * 1.05) return null;
 
@@ -538,6 +579,43 @@ function computeQrEnlargement(qr, items, ink, W, H) {
   };
 }
 
+function checkFinderVertical(mask, w, h, midX, midY, total) {
+  if (midX < 0 || midX >= w || midY < 0 || midY >= h) return false;
+  const mod = total / 7;
+  const tol = mod * 0.75;
+  let y = midY;
+  while (y >= 0 && mask[y * w + midX]) y--;
+  const topCenter = y + 1;
+  y = midY;
+  while (y < h && mask[y * w + midX]) y++;
+  const bottomCenter = y - 1;
+  const centerLen = bottomCenter - topCenter + 1;
+  if (Math.abs(centerLen - 3 * mod) > 3 * tol) return false;
+
+  y = topCenter - 1;
+  while (y >= 0 && !mask[y * w + midX]) y--;
+  const whiteTop = topCenter - 1 - y;
+  if (Math.abs(whiteTop - mod) > tol) return false;
+
+  const darkTopStart = y;
+  while (y >= 0 && mask[y * w + midX]) y--;
+  const darkTop = darkTopStart - y;
+  if (Math.abs(darkTop - mod) > tol) return false;
+
+  y = bottomCenter + 1;
+  while (y < h && !mask[y * w + midX]) y++;
+  const whiteBottom = y - (bottomCenter + 1);
+  if (Math.abs(whiteBottom - mod) > tol) return false;
+
+  const darkBottomStart = y;
+  while (y < h && mask[y * w + midX]) y++;
+  const darkBottom = y - darkBottomStart;
+  if (Math.abs(darkBottom - mod) > tol) return false;
+
+  const totalV = centerLen + whiteTop + darkTop + whiteBottom + darkBottom;
+  return Math.abs(totalV - total) < total * 0.35;
+}
+
 function findVisualQrFromInk(ink, W, H) {
   const { mask, width: w, height: h, scale: s } = ink;
   const finders = [];
@@ -566,7 +644,9 @@ function findVisualQrFromInk(ink, W, H) {
             ) {
               const cx = (x - counts[4] - counts[3] - counts[2] / 2) / s;
               const cy = y / s;
-              finders.push({ x: cx, y: cy, size: total / s });
+              if (checkFinderVertical(mask, w, h, Math.round(cx * s), y, total)) {
+                finders.push({ x: cx, y: cy, size: total / s });
+              }
             }
             counts[0] = counts[2]; counts[1] = counts[3]; counts[2] = counts[4];
             counts[3] = 1; counts[4] = 0;

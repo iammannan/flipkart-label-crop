@@ -167,8 +167,9 @@ export async function buildPdf(files, orders, settings) {
     if (settings.enlargeQr && it.ref.page.qrCodes?.length) {
       for (const q of it.ref.page.qrCodes) {
         if (!q.enlargedBox) continue;
-        if (q.box.x0 >= box.x0 - 2 && q.box.x1 <= box.x1 + 2 &&
-            q.box.y0 >= box.y0 - 2 && q.box.y1 <= box.y1 + 2) {
+        const qcx = (q.box.x0 + q.box.x1) / 2;
+        const qcy = (q.box.y0 + q.box.y1) / 2;
+        if (qcx >= box.x0 && qcx <= box.x1 && qcy >= box.y0 && qcy <= box.y1) {
           const qrItem = { ...q };
           if (doc.isEncrypted) {
             qrItem.obj = await rasterRegion(file, it.ref, q.box, out);
