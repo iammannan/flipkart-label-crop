@@ -1,13 +1,13 @@
 # Flipkart Label Crop & Cutter — Free Quick Label Crop Tool
 
-[![Live Tool](https://img.shields.io/badge/Live%20Tool-iammannan.github.io%2Fflipkart--label--crop-7DBE00?style=for-the-badge&logo=googlechrome&logoColor=white)](https://iammannan.github.io/flipkart-label-crop/)
+[![Live Tool](https://img.shields.io/badge/Live%20Tool-labelcropai.web.app-7DBE00?style=for-the-badge&logo=googlechrome&logoColor=white)](https://labelcropai.web.app/flipkart-label-crop)
 [![Google Play](https://img.shields.io/badge/Google%20Play-Android%20App-00E676?style=for-the-badge&logo=googleplay&logoColor=white)](https://play.google.com/store/apps/details?id=ecom.label.crop.tool&hl=en)
-[![Privacy](https://img.shields.io/badge/Privacy-100%25%20On--Device%20(No%20Upload)-blue?style=for-the-badge&logo=shield&logoColor=white)](https://iammannan.github.io/flipkart-label-crop/privacy)
+[![Privacy](https://img.shields.io/badge/Privacy-100%25%20On--Device%20(No%20Upload)-blue?style=for-the-badge&logo=shield&logoColor=white)](https://labelcropai.web.app/privacy)
 [![License](https://img.shields.io/badge/License-MIT-lightgrey?style=for-the-badge)](LICENSE)
 
 > **Free online Flipkart label crop and Flipkart label cutter tool.** Crop Flipkart Seller Hub and Shopsy shipping label PDFs for 4x6 thermal printers and A4 sticker sheets in 1 click. Zero server uploads &mdash; 100% private, on-device vector processing.
 
-👉 **Use the live tool now:** [https://iammannan.github.io/flipkart-label-crop/](https://iammannan.github.io/flipkart-label-crop/)
+👉 **Use the live tool now:** [https://labelcropai.web.app/flipkart-label-crop](https://labelcropai.web.app/flipkart-label-crop) *(GitHub mirror: [iammannan.github.io/flipkart-label-crop](https://iammannan.github.io/flipkart-label-crop/))*
 
 ---
 
@@ -42,7 +42,7 @@ Sending that raw A4 PDF straight to a 4×6 thermal printer squeezes the entire p
 ## 📖 How to Crop Flipkart Shipping Labels in 3 Steps
 
 1. **Download PDF from Flipkart Seller Hub**: In your Flipkart Seller panel, go to **Orders &rarr; Dispatch After Packing** and download your shipping label PDF.
-2. **Drop File into Flipkart Label Crop Tool**: Visit [Flipkart Label Crop](https://iammannan.github.io/flipkart-label-crop/) and drag & drop your label PDF into the upload area.
+2. **Drop File into Flipkart Label Crop Tool**: Visit [Flipkart Label Crop](https://labelcropai.web.app/flipkart-label-crop) and drag & drop your label PDF into the upload area.
 3. **Select Format & Print**: Choose **4×6 in** for thermal rolls or **A4 Smart Fit / 4-up**, customize sorting by SKU or courier, and click **Download PDF** or **Print**.
 
 ---
